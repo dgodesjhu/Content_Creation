@@ -127,8 +127,8 @@ if st.button("🚀 Generate Tweets"):
         st.warning("Please upload both CSVs, enter a message, and provide your API key.")
     else:
         try:
-            high_df = pd.read_csv(high_file, encoding="utf-8", errors="replace")
-            style_df = pd.read_csv(style_file, encoding="utf-8", errors="replace")
+            high_df = pd.read_csv(high_file, encoding="latin1")
+            style_df = pd.read_csv(style_file, encoding="latin1")
 
             if "tweet_text" not in high_df.columns or "tweet_text" not in style_df.columns:
                 st.error("Each file must contain a 'tweet_text' column.")
