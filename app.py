@@ -33,6 +33,9 @@ def load_embedder():
     return SentenceTransformer("all-MiniLM-L6-v2")
 embed_model = load_embedder()
 
+def remove_non_ascii(text):
+    return text.encode("ascii", errors="ignore").decode()
+
 def color_score(val):
     try:
         score = float(val)
@@ -129,7 +132,7 @@ if st.button("🚀 Generate Tweets"):
                     all_evals = []
                     for tweet in tweets:
                         scores = evaluate_tweet(tweet, style_texts[:5])
-                        scores["Tweet"] = tweet
+                        scores["Tweet"] = remove_non_ascii(tweet)
                         all_evals.append(scores)
                         time.sleep(1.5)
 
