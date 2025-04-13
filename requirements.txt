@@ -1,6 +1,5 @@
 streamlit
-openai
 pandas
 numpy
+openai>=1.0
 sentence-transformers
-scikit-learn
