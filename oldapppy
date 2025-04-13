@@ -1,36 +1,33 @@
 import streamlit as st
-import openai
 import pandas as pd
 import numpy as np
 import time
 from sentence_transformers import SentenceTransformer
+from openai import OpenAI
 
-# ---------------- Page Config ----------------
 st.set_page_config(page_title="Tweet Generator & Evaluator", layout="wide")
 
-# ---------------- Sidebar: API Key ----------------
+# Sidebar for API key
 st.sidebar.title("🔐 API Key Setup")
 user_api_key = st.sidebar.text_input("Enter your OpenAI API key", type="password")
-if user_api_key:
-    openai.api_key = user_api_key
+if not user_api_key:
+    st.warning("Please enter your API key to continue.")
+    st.stop()
 
-# ---------------- Header ----------------
+client = OpenAI(api_key=user_api_key)
+
 st.title("AI-Powered Tweet Generator & Evaluator")
-st.markdown("""
-Upload two CSVs and enter a message. The app will use examples of high-engagement tweets and style inspiration tweets to generate 10 optimized tweets that communicate your message.
-""")
+st.markdown("Upload two CSVs and a message. Get 10 AI-generated tweets, evaluated for effectiveness.")
 
-# ---------------- File Upload ----------------
+# Upload
 col1, col2 = st.columns(2)
 with col1:
-    high_file = st.file_uploader("📈 High-Engagement Tweets CSV", type="csv", key="high")
+    high_file = st.file_uploader("📈 High-Engagement Tweets CSV", type="csv")
 with col2:
-    style_file = st.file_uploader("🎨 Style Inspiration Tweets CSV", type="csv", key="style")
+    style_file = st.file_uploader("🎨 Style Tweets CSV", type="csv")
 
-# ---------------- Message ----------------
-message = st.text_area("💬 What message do you want to communicate?", placeholder="E.g. AI helps marketers work faster")
+message = st.text_area("💬 What message should the tweets communicate?", placeholder="E.g. AI helps marketers work faster")
 
-# ---------------- Embedding Model ----------------
 @st.cache_resource
 def load_embedder():
     return SentenceTransformer("all-MiniLM-L6-v2")
@@ -39,99 +36,89 @@ embed_model = load_embedder()
 def color_score(val):
     try:
         score = float(val)
-        if score >= 4.5:
-            color = "#4CAF50"  # dark green
-        elif score >= 3.5:
-            color = "#8BC34A"
-        elif score >= 2.5:
-            color = "#FFEB3B"
-        elif score >= 1.5:
-            color = "#FFC107"
-        else:
-            color = "#F44336"
-        return f"background-color: {color}"
+        if score >= 4.5: return "background-color: #4CAF50"
+        elif score >= 3.5: return "background-color: #8BC34A"
+        elif score >= 2.5: return "background-color: #FFEB3B"
+        elif score >= 1.5: return "background-color: #FFC107"
+        else: return "background-color: #F44336"
     except:
         return ""
 
 def evaluate_tweet(tweet, style_examples):
     style_sample = " | ".join(style_examples)
     prompt = f"""
-You are a tweet evaluator. Evaluate the following tweet on a scale of 1 to 5 (1 = poor, 5 = excellent) for these categories:
+You are a tweet evaluator. Rate the tweet below on a scale of 1–5 (1 = poor, 5 = excellent):
 - Readability
 - Clarity
 - Persuasiveness
 - Humor
 - Edginess
-- Style Match (based on these examples: {style_sample})
+- Style Match (based on: {style_sample})
 
 Tweet: "{tweet}"
 
-Respond in this format:
+Respond as:
 Readability: #
 Clarity: #
 Persuasiveness: #
 Humor: #
 Edginess: #
 Style Match: #
-    """
+"""
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4o",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.4,
             max_tokens=200
         )
-        raw = response["choices"][0]["message"]["content"]
+        raw = response.choices[0].message.content
         lines = raw.splitlines()
         scores = {}
         for line in lines:
             if ":" in line:
                 key, val = line.split(":", 1)
-                try:
-                    scores[key.strip()] = float(val.strip())
-                except:
-                    scores[key.strip()] = np.nan
+                scores[key.strip()] = float(val.strip())
         return scores
-    except Exception as e:
+    except:
         return {}
 
 def generate_tweets(message, high_examples, style_examples):
-    high = "\\n".join(high_examples[:5])
-    style = "\\n".join(style_examples[:5])
+    high = "\n".join(high_examples[:5])
+    style = "\n".join(style_examples[:5])
     prompt = f"""
-You are helping a student write tweets to communicate this message:
+You are helping a student write tweets about:
 
 "{message}"
 
-Here are examples of tweets with high engagement:
+Here are high-engagement examples:
 {high}
 
-Here are examples of tweets that reflect the desired tone:
+Here are stylistic inspirations:
 {style}
 
-Based on the examples, write 10 short, engaging tweets under 280 characters. Do not number them. Keep each tweet on its own line.
+Generate 10 short, engaging tweets (<280 characters). Don't number them. Put each on a new line.
 """
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": prompt}],
         temperature=0.9,
         max_tokens=800
     )
-    content = response["choices"][0]["message"]["content"]
+    content = response.choices[0].message.content
     tweets = [line.strip() for line in content.splitlines() if line.strip()]
     return tweets[:10]
 
-# ---------------- Run Button ----------------
 if st.button("🚀 Generate Tweets"):
-    if not (high_file and style_file and message and user_api_key):
-        st.warning("Please upload both CSVs, enter a message, and provide your API key.")
+    if not (high_file and style_file and message):
+        st.warning("Please upload both CSVs and a message.")
     else:
         try:
             high_df = pd.read_csv(high_file, encoding="latin1")
             style_df = pd.read_csv(style_file, encoding="latin1")
 
             if "tweet_text" not in high_df.columns or "tweet_text" not in style_df.columns:
-                st.error("Each file must contain a 'tweet_text' column.")
+                st.error("Each file must contain a column named 'tweet_text'.")
             else:
                 high_texts = high_df["tweet_text"].dropna().tolist()
                 style_texts = style_df["tweet_text"].dropna().tolist()
@@ -144,11 +131,10 @@ if st.button("🚀 Generate Tweets"):
                         scores = evaluate_tweet(tweet, style_texts[:5])
                         scores["Tweet"] = tweet
                         all_evals.append(scores)
-                        time.sleep(1.5)  # to avoid rate limit
+                        time.sleep(1.5)
 
                     df_out = pd.DataFrame(all_evals).set_index("Tweet")
-                    st.markdown("### ✅ Results: Color-coded Evaluation")
+                    st.markdown("### ✅ Evaluation Results")
                     st.dataframe(df_out.style.applymap(color_score), height=600)
-
         except Exception as e:
             st.error(f"Something went wrong: {e}")
