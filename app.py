@@ -2,13 +2,14 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import time
+import re
 from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 
 st.set_page_config(page_title="Tweet Generator & Evaluator", layout="wide")
 
 # Sidebar for API key
-st.sidebar.title("🔐 API Key Setup")
+st.sidebar.title("API Key Setup")
 user_api_key = st.sidebar.text_input("Enter your OpenAI API key", type="password")
 if not user_api_key:
     st.warning("Please enter your API key to continue.")
@@ -22,9 +23,9 @@ st.markdown("Upload two CSVs and a message. Get 10 AI-generated tweets, evaluate
 # Upload
 col1, col2 = st.columns(2)
 with col1:
-    high_file = st.file_uploader("📈 High-Engagement Tweets CSV", type="csv")
+    high_file = st.file_uploader("High-Engagement Tweets CSV", type="csv")
 with col2:
-    style_file = st.file_uploader("🎨 Style Tweets CSV", type="csv")
+    style_file = st.file_uploader("Style Tweets CSV", type="csv")
 
 message = st.text_area("💬 What message should the tweets communicate?", placeholder="E.g. AI helps marketers work faster")
 
@@ -35,6 +36,11 @@ embed_model = load_embedder()
 
 def remove_non_ascii(text):
     return text.encode("ascii", errors="ignore").decode()
+
+def clean_text(text):
+    text = text.replace("’", "'").replace("“", "\"").replace("”", "\"").replace("–", "-")
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 def color_score(val):
     try:
@@ -109,10 +115,10 @@ Generate 10 short, engaging tweets (<280 characters). Don't number them. Put eac
         max_tokens=800
     )
     content = response.choices[0].message.content
-    tweets = [line.strip() for line in content.splitlines() if line.strip()]
+    tweets = [clean_text(line.strip()) for line in content.splitlines() if line.strip()]
     return tweets[:10]
 
-if st.button("🚀 Generate Tweets"):
+if st.button("Generate Tweets"):
     if not (high_file and style_file and message):
         st.warning("Please upload both CSVs and a message.")
     else:
@@ -137,7 +143,44 @@ if st.button("🚀 Generate Tweets"):
                         time.sleep(1.5)
 
                     df_out = pd.DataFrame(all_evals).set_index("Tweet")
-                    st.markdown("### ✅ Evaluation Results")
-                    st.dataframe(df_out.style.applymap(color_score), height=600)
+                    df_out = df_out.round(0).astype("Int64")
+
+                    st.markdown("### Evaluation Results")
+                    st.dataframe(
+                        df_out.style
+                            .applymap(color_score)
+                            .set_properties(**{"white-space": "pre-wrap", "word-wrap": "break-word"}),
+                        height=600
+                    )
+
+                    with st.expander("What do the scores mean?"):
+                        st.markdown("""
+- **Readability**: Is the tweet easy to read and skim?
+- **Clarity**: Is the message unambiguous and direct?
+- **Persuasiveness**: How likely is the tweet to motivate engagement or agreement?
+- **Humor**: Does the tweet make clever or funny use of language?
+- **Edginess**: Does it challenge norms or provoke thought?
+- **Style Match**: How well does it reflect the tone of your style inspiration tweets?
+""")
+
         except Exception as e:
             st.error(f"Something went wrong: {e}")
+
+# Optional: Add one custom tweet for evaluation
+st.markdown("---")
+custom_tweet = st.text_input("Add your own tweet to evaluate")
+if custom_tweet:
+    if st.button("Evaluate My Tweet"):
+        st.markdown("Evaluating your tweet...")
+        tweet_clean = clean_text(custom_tweet)
+        scores = evaluate_tweet(tweet_clean, style_texts[:5])
+        scores["Tweet"] = remove_non_ascii(tweet_clean)
+        df_custom = pd.DataFrame([scores]).set_index("Tweet")
+        df_custom = df_custom.round(0).astype("Int64")
+
+        st.markdown("### Evaluation of Your Custom Tweet")
+        st.dataframe(
+            df_custom.style
+                .applymap(color_score)
+                .set_properties(**{"white-space": "pre-wrap", "word-wrap": "break-word"})
+        )
