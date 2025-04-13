@@ -146,12 +146,8 @@ if st.button("Generate Tweets"):
                     df_out = df_out.round(0).astype("Int64")
 
                     st.markdown("### Evaluation Results")
-                    st.dataframe(
-                        df_out.style
-                            .applymap(color_score)
-                            .set_properties(**{"white-space": "pre-wrap", "word-wrap": "break-word"}),
-                        height=600
-                    )
+                    styled = df_out.style.applymap(color_score)
+                    st.table(styled)
 
                     with st.expander("What do the scores mean?"):
                         st.markdown("""
