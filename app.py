@@ -36,6 +36,17 @@ def load_embedder():
 def remove_non_ascii(text):
     return text.encode("ascii", errors="ignore").decode()
 
+def sanitize(text):
+    return (
+        text.replace("’", "'")
+            .replace("“", '"')
+            .replace("”", '"')
+            .replace("–", "-")
+            .encode("ascii", errors="ignore")
+            .decode()
+            .strip()
+    )
+
 def clean_text(text):
     text = text.replace("’", "'").replace("“", "\"").replace("”", "\"").replace("–", "-")
     text = re.sub(r"\s+", " ", text)
@@ -151,7 +162,7 @@ if st.button("Generate Tweets"):
                     all_evals = []
                     for tweet in tweets:
                         scores = evaluate_tweet(tweet, style_texts[:5], client)
-                        scores["Tweet"] = remove_non_ascii(tweet)
+                        scores["Tweet"] = sanitize(tweet)
                         all_evals.append(scores)
                         time.sleep(1.5)
                     st.session_state.evaluations = all_evals
