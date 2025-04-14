@@ -32,7 +32,6 @@ message = st.text_area("What message should the tweets communicate?", placeholde
 @st.cache_resource
 def load_embedder():
     return SentenceTransformer("all-MiniLM-L6-v2")
-embed_model = load_embedder()
 
 def remove_non_ascii(text):
     return text.encode("ascii", errors="ignore").decode()
@@ -42,18 +41,7 @@ def clean_text(text):
     text = re.sub(r"\s+", " ", text)
     return text.strip()
 
-def color_score(val):
-    try:
-        score = float(val)
-        if score >= 4.5: return "background-color: #4CAF50"
-        elif score >= 3.5: return "background-color: #8BC34A"
-        elif score >= 2.5: return "background-color: #FFEB3B"
-        elif score >= 1.5: return "background-color: #FFC107"
-        else: return "background-color: #F44336"
-    except:
-        return ""
-
-def evaluate_tweet(tweet, style_examples):
+def evaluate_tweet(tweet, style_examples, client):
     style_sample = " | ".join(style_examples)
     prompt = f"""
 You are a tweet evaluator. Rate the tweet below on a scale of 1–5 (1 = poor, 5 = excellent):
@@ -87,12 +75,12 @@ Style Match: #
         for line in lines:
             if ":" in line:
                 key, val = line.split(":", 1)
-                scores[key.strip()] = float(val.strip())
+                scores[key.strip()] = int(float(val.strip()))
         return scores
     except:
         return {}
 
-def generate_tweets(message, high_examples, style_examples):
+def generate_tweets(message, high_examples, style_examples, client):
     high = "\n".join(high_examples[:5])
     style = "\n".join(style_examples[:5])
     prompt = f"""
@@ -118,7 +106,7 @@ Generate 10 short, engaging tweets (<280 characters). Don't number them. Put eac
     tweets = [clean_text(line.strip()) for line in content.splitlines() if line.strip()]
     return tweets[:10]
 
-def regenerate_tweet(original, feedback):
+def regenerate_tweet(original, feedback, client):
     prompt = f"""
 You are rewriting a tweet to match the following feedback:
 
@@ -136,6 +124,13 @@ Please rewrite the tweet accordingly. Keep it under 280 characters.
     )
     return clean_text(response.choices[0].message.content.strip())
 
+# Initialize session state
+if "tweets" not in st.session_state:
+    st.session_state.tweets = []
+if "evaluations" not in st.session_state:
+    st.session_state.evaluations = []
+
+# Generate
 if st.button("Generate Tweets"):
     if not (high_file and style_file and message):
         st.warning("Please upload both CSVs and a message.")
@@ -151,56 +146,51 @@ if st.button("Generate Tweets"):
                 style_texts = style_df["tweet_text"].dropna().tolist()
 
                 with st.spinner("Generating and evaluating tweets..."):
-                    tweets = generate_tweets(message, high_texts, style_texts)
-
+                    tweets = generate_tweets(message, high_texts, style_texts, client)
+                    st.session_state.tweets = tweets
                     all_evals = []
                     for tweet in tweets:
-                        scores = evaluate_tweet(tweet, style_texts[:5])
+                        scores = evaluate_tweet(tweet, style_texts[:5], client)
                         scores["Tweet"] = remove_non_ascii(tweet)
                         all_evals.append(scores)
                         time.sleep(1.5)
-
-                    df_out = pd.DataFrame(all_evals).set_index("Tweet")
-                    df_out = df_out.round(0).astype("Int64")
-
-                    st.markdown("### Evaluation Results")
-                    st.dataframe(
-                        df_out.style
-                            .applymap(color_score)
-                            .set_properties(**{"white-space": "pre-wrap", "word-wrap": "break-word"}),
-                        height=600
-                    )
-
-                    with st.expander("What do the scores mean?"):
-                        st.markdown("""
-- **Readability**: Is the tweet easy to read and skim?
-- **Clarity**: Is the message unambiguous and direct?
-- **Persuasiveness**: How likely is the tweet to motivate engagement or agreement?
-- **Humor**: Does the tweet make clever or funny use of language?
-- **Edginess**: Does it challenge norms or provoke thought?
-- **Style Match**: How well does it reflect the tone of your style inspiration tweets?
-""")
-
-                    # Select tweets for regeneration
-                    st.markdown("---")
-                    st.markdown("#### Regenerate Selected Tweets with Style Feedback")
-                    selected_indices = []
-                    for i, tweet in enumerate(df_out.index.tolist()):
-                        if st.checkbox(f"Tweet {i+1}: {tweet}", key=f"check_{i}"):
-                            selected_indices.append(i)
-
-                    if selected_indices:
-                        feedback = st.text_input("Enter your feedback (e.g., 'make it snarkier'):")
-                        if st.button("Regenerate Selected Tweets"):
-                            regenerated = []
-                            for i in selected_indices:
-                                new_tweet = regenerate_tweet(df_out.index[i], feedback)
-                                regenerated.append({
-                                    "Original Tweet": df_out.index[i],
-                                    "Regenerated Tweet": new_tweet
-                                })
-                            regen_df = pd.DataFrame(regenerated)
-                            st.markdown("### Regenerated Tweets")
-                            st.table(regen_df)
+                    st.session_state.evaluations = all_evals
         except Exception as e:
             st.error(f"Something went wrong: {e}")
+
+# Display results and regenerate options
+if st.session_state.evaluations:
+    st.markdown("### Evaluation Results")
+    selected = []
+
+    for i, entry in enumerate(st.session_state.evaluations):
+        with st.container():
+            col1, col2 = st.columns([0.85, 0.15])
+            with col1:
+                st.markdown(f"**Tweet {i+1}:** {entry['Tweet']}")
+                st.markdown(
+                    f"Readability: {entry['Readability']} | "
+                    f"Clarity: {entry['Clarity']} | "
+                    f"Persuasiveness: {entry['Persuasiveness']} | "
+                    f"Humor: {entry['Humor']} | "
+                    f"Edginess: {entry['Edginess']} | "
+                    f"Style Match: {entry['Style Match']}"
+                )
+            with col2:
+                if st.checkbox("Regenerate", key=f"select_{i}"):
+                    selected.append(i)
+
+    if selected:
+        st.markdown("---")
+        feedback = st.text_input("How would you like to revise the selected tweets?")
+        if st.button("Regenerate Selected"):
+            regenerated = []
+            for i in selected:
+                original = st.session_state.evaluations[i]["Tweet"]
+                new_version = regenerate_tweet(original, feedback, client)
+                regenerated.append({
+                    "Original Tweet": original,
+                    "Regenerated Tweet": new_version
+                })
+            st.markdown("### Regenerated Tweets")
+            st.table(pd.DataFrame(regenerated))
